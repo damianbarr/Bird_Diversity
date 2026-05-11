@@ -213,7 +213,7 @@ left_col, right_col = st.columns(2)
 
 with left_col:
     left_map_variable = st.selectbox(
-        "Map 1",
+        "Left Map",
         options=map_options,
         index=0,
         key="left_map_variable"
@@ -221,7 +221,7 @@ with left_col:
 
 with right_col:
     right_map_variable = st.selectbox(
-        "Map 2",
+        "Right Map",
         options=map_options,
         index=1,
         key="right_map_variable"
