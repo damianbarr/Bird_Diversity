@@ -239,13 +239,20 @@ tooltip_aliases = [
 
 filtered_geoids = set(filtered["GEOID"].astype(str).str.replace(".0", "", regex=False))
 
+filtered_features = []
+
+for feature in geojson_data["features"]:
+    feature_geoid = str(feature["properties"].get("GEOID")).replace(".0", "")
+    
+    if feature_geoid in filtered_geoids:
+        filtered_features.append(feature)
+
 filtered_geojson = {
     "type": "FeatureCollection",
-    "features": [
-        feature for feature in geojson_data["features"]
-        if str(feature["properties"].get("GEOID")) in filtered_geoids
-    ]
+    "features": filtered_features
 }
+
+st.write("Features shown on map:", len(filtered_features))
 
 folium.GeoJson(
     filtered_geojson,
@@ -256,6 +263,26 @@ folium.GeoJson(
         localize=True
     )
 ).add_to(m)
+
+if len(filtered_features) > 0:
+    bounds = []
+
+    for feature in filtered_features:
+        geom = feature["geometry"]
+        
+        if geom["type"] == "Polygon":
+            coords = geom["coordinates"][0]
+            for lon, lat in coords:
+                bounds.append([lat, lon])
+        
+        elif geom["type"] == "MultiPolygon":
+            for polygon in geom["coordinates"]:
+                coords = polygon[0]
+                for lon, lat in coords:
+                    bounds.append([lat, lon])
+
+    if bounds:
+        m.fit_bounds(bounds)
 
 st_folium(m, use_container_width=True, height=650)
 
