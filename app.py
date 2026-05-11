@@ -159,37 +159,6 @@ filtered = tracts[
     (tracts["log_observations"] <= log_obs_range[1])
 ].copy()
 
-
-# --------------------------------------------------
-# Summary metrics
-# --------------------------------------------------
-
-st.subheader("Summary Metrics")
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.metric("Census tracts shown", f"{len(filtered):,}")
-
-with col2:
-    st.metric("Total observations", f"{int(filtered['observations'].sum()):,}")
-
-with col3:
-    if len(filtered) > 0:
-        st.metric("Average measured diversity", f"{filtered['diversity'].mean():.1f}")
-    else:
-        st.metric("Average measured diversity", "0")
-
-with col4:
-    if len(filtered) > 0:
-        st.metric(
-            "Average population density",
-            f"{filtered['population_density'].mean():.1f} people/km²"
-        )
-    else:
-        st.metric("Average population density", "0")
-
-
 # --------------------------------------------------
 # Build filtered GeoJSON
 # --------------------------------------------------
@@ -244,7 +213,6 @@ left_col, right_col = st.columns(2)
 
 with left_col:
     left_map_variable = st.selectbox(
-        "Left map variable",
         options=map_options,
         index=0,
         key="left_map_variable"
@@ -252,7 +220,6 @@ with left_col:
 
 with right_col:
     right_map_variable = st.selectbox(
-        "Right map variable",
         options=map_options,
         index=1,
         key="right_map_variable"
