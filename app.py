@@ -1,3 +1,5 @@
+import json
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,7 +9,6 @@ import seaborn as sns
 import folium
 from streamlit_folium import st_folium
 import branca.colormap as cm
-import json
 
 
 # --------------------------------------------------
@@ -16,10 +17,11 @@ import json
 
 st.set_page_config(
     page_title="Texas Bird Diversity Dashboard",
+    page_icon="🐦",
     layout="wide"
 )
 
-st.title("Texas Bird Diversity and Citizen-Science Effort Dashboard")
+st.title("🐦 Texas Bird Diversity and Citizen-Science Effort Dashboard")
 
 st.markdown(
     """
@@ -31,14 +33,34 @@ st.markdown(
     """
 )
 
+# CSS to keep Folium legend from getting cut off
+st.markdown(
+    """
+    <style>
+    .leaflet-control {
+        margin-right: 30px !important;
+        margin-top: 30px !important;
+    }
+    .legend {
+        max-width: 260px !important;
+        white-space: normal !important;
+        font-size: 12px !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 
 # --------------------------------------------------
-# Load data
+# Load GeoJSON without GeoPandas
 # --------------------------------------------------
 
 @st.cache_data
 def load_data():
-    with open("tract_bird_population_landcover_map.geojson", "r") as f:
+    geojson_file = "tract_bird_population_landcover_map.geojson"
+
+    with open(geojson_file, "r") as f:
         geojson_data = json.load(f)
 
     records = []
@@ -49,9 +71,13 @@ def load_data():
 
     df = pd.DataFrame(records)
 
-    df["GEOID"] = df["GEOID"].astype(str).str.replace(".0", "", regex=False)
+    # Make sure GEOID is string
+    if "GEOID" in df.columns:
+        df["GEOID"] = df["GEOID"].astype(str).str.replace(".0", "", regex=False)
+    else:
+        df["GEOID"] = df.index.astype(str)
 
-    # Clean numeric columns
+    # Required numeric columns
     numeric_cols = [
         "observations",
         "diversity",
@@ -61,31 +87,35 @@ def load_data():
     ]
 
     for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        if col not in df.columns:
+            df[col] = 0
 
-    # Create log columns
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    # Required categorical column
+    if "nlcd_class" not in df.columns:
+        df["nlcd_class"] = "Unknown"
+
+    df["nlcd_class"] = df["nlcd_class"].fillna("Unknown").astype(str)
+
+    # Log columns
     df["log_observations"] = np.log1p(df["observations"])
     df["log_diversity"] = np.log1p(df["diversity"])
     df["log_population_density"] = np.log1p(df["population_density"])
 
-    if "nlcd_class" not in df.columns:
-        df["nlcd_class"] = "Unknown"
-
-    df["GEOID"] = df["GEOID"].astype(str)
+    # Clean GeoJSON feature GEOIDs too
+    for feature in geojson_data["features"]:
+        if "GEOID" in feature["properties"]:
+            feature["properties"]["GEOID"] = str(feature["properties"]["GEOID"]).replace(".0", "")
 
     return df, geojson_data
 
 
 tracts, geojson_data = load_data()
 
-st.write("Rows loaded:", len(tracts))
-st.write("GeoJSON features loaded:", len(geojson_data["features"]))
-st.write(tracts.head())
-
 
 # --------------------------------------------------
-# Sidebar filters
+# Sidebar controls
 # --------------------------------------------------
 
 st.sidebar.header("Dashboard Controls")
@@ -98,13 +128,15 @@ selected_landcovers = st.sidebar.multiselect(
     default=available_landcovers
 )
 
-min_obs, max_obs = int(tracts["observations"].min()), int(tracts["observations"].max())
+# Avoid huge slider problems by using log observations for filter
+min_log_obs = float(tracts["log_observations"].min())
+max_log_obs = float(tracts["log_observations"].max())
 
-obs_range = st.sidebar.slider(
-    "Observation count range",
-    min_value=min_obs,
-    max_value=max_obs,
-    value=(min_obs, max_obs)
+log_obs_range = st.sidebar.slider(
+    "Log observation effort range",
+    min_value=min_log_obs,
+    max_value=max_log_obs,
+    value=(min_log_obs, max_log_obs)
 )
 
 map_variable = st.sidebar.selectbox(
@@ -123,9 +155,64 @@ map_variable = st.sidebar.selectbox(
 
 filtered = tracts[
     (tracts["nlcd_class"].isin(selected_landcovers)) &
-    (tracts["observations"] >= obs_range[0]) &
-    (tracts["observations"] <= obs_range[1])
+    (tracts["log_observations"] >= log_obs_range[0]) &
+    (tracts["log_observations"] <= log_obs_range[1])
 ].copy()
+
+
+# --------------------------------------------------
+# Summary metrics
+# --------------------------------------------------
+
+st.subheader("Summary Metrics")
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.metric("Census tracts shown", f"{len(filtered):,}")
+
+with col2:
+    st.metric("Total observations", f"{int(filtered['observations'].sum()):,}")
+
+with col3:
+    if len(filtered) > 0:
+        st.metric("Average measured diversity", f"{filtered['diversity'].mean():.1f}")
+    else:
+        st.metric("Average measured diversity", "0")
+
+with col4:
+    if len(filtered) > 0:
+        st.metric(
+            "Average population density",
+            f"{filtered['population_density'].mean():.1f} people/km²"
+        )
+    else:
+        st.metric("Average population density", "0")
+
+
+# --------------------------------------------------
+# Build filtered GeoJSON
+# --------------------------------------------------
+
+def make_filtered_geojson(full_geojson, filtered_df):
+    filtered_geoids = set(filtered_df["GEOID"].astype(str))
+
+    filtered_features = []
+
+    for feature in full_geojson["features"]:
+        feature_geoid = str(feature["properties"].get("GEOID", "")).replace(".0", "")
+
+        if feature_geoid in filtered_geoids:
+            filtered_features.append(feature)
+
+    return {
+        "type": "FeatureCollection",
+        "features": filtered_features
+    }
+
+
+filtered_geojson = make_filtered_geojson(geojson_data, filtered)
+
 
 # --------------------------------------------------
 # Interactive map
@@ -135,156 +222,122 @@ st.subheader("Interactive Map")
 
 st.markdown(
     """
-    Use the sidebar to change the mapped variable.  
-    Log-transformed variables are useful because observation effort and population density are highly skewed.
+    Use the sidebar to change the mapped variable and filter by land cover.
+    Log-transformed variables help show patterns when data are highly skewed.
     """
 )
 
-# Center map on Texas
 m = folium.Map(
     location=[31.0, -99.0],
-    zoom_start=6,
+    zoom_start=5,
     tiles="cartodbpositron"
 )
 
-# Continuous variable map
-if map_variable != "nlcd_class":
+if len(filtered_geojson["features"]) == 0:
+    st.warning("No tracts match the selected filters.")
+else:
 
-    values = filtered[map_variable].replace([np.inf, -np.inf], np.nan).dropna()
+    # Continuous variable map
+    if map_variable != "nlcd_class":
 
-    if len(values) > 0:
-        vmin = float(values.quantile(0.05))
-        vmax = float(values.quantile(0.95))
+        values = filtered[map_variable].replace([np.inf, -np.inf], np.nan).dropna()
 
-        if vmin == vmax:
-            vmin = float(values.min())
-            vmax = float(values.max())
+        if len(values) == 0:
+            vmin, vmax = 0, 1
+        else:
+            vmin = float(values.quantile(0.05))
+            vmax = float(values.quantile(0.95))
+
+            if vmin == vmax:
+                vmin = float(values.min())
+                vmax = float(values.max())
+
+            if vmin == vmax:
+                vmax = vmin + 1
 
         colormap = cm.linear.YlOrRd_09.scale(vmin, vmax)
-        colormap.caption = map_variable.replace("_", " ").title()
+
+        caption_names = {
+            "log_observations": "Log Observations",
+            "log_diversity": "Log Diversity",
+            "log_population_density": "Log Pop. Density",
+            "observations": "Observations",
+            "diversity": "Diversity",
+            "population_density": "Pop. Density"
+        }
+
+        colormap.caption = caption_names.get(map_variable, map_variable)
         colormap.add_to(m)
 
         def style_function(feature):
             value = feature["properties"].get(map_variable)
 
-            if value is None:
-                color = "#d9d9d9"
-            else:
-                try:
-                    value = float(value)
-                    color = colormap(value)
-                except Exception:
-                    color = "#d9d9d9"
+            try:
+                value = float(value)
+                fill_color = colormap(value)
+            except Exception:
+                fill_color = "#d9d9d9"
 
             return {
-                "fillColor": color,
+                "fillColor": fill_color,
                 "color": "black",
-                "weight": 0.2,
+                "weight": 0.15,
                 "fillOpacity": 0.65
             }
 
+    # Categorical land-cover map
     else:
-        def style_function(feature):
-            return {
-                "fillColor": "#d9d9d9",
-                "color": "black",
-                "weight": 0.2,
-                "fillOpacity": 0.65
-            }
-
-# Categorical land-cover map
-else:
-    landcover_colors = {
-        "Water": "#2b83ba",
-        "Developed": "#d7191c",
-        "Barren": "#bdbdbd",
-        "Forest": "#1a9641",
-        "Shrub/Scrub": "#a6d96a",
-        "Grassland": "#ffffbf",
-        "Agriculture": "#fdae61",
-        "Wetlands": "#74add1",
-        "Other": "#969696",
-        "Unknown": "#d9d9d9"
-    }
-
-    def style_function(feature):
-        landcover = feature["properties"].get("nlcd_class")
-        color = landcover_colors.get(landcover, "#d9d9d9")
-
-        return {
-            "fillColor": color,
-            "color": "black",
-            "weight": 0.2,
-            "fillOpacity": 0.65
+        landcover_colors = {
+            "Water": "#2b83ba",
+            "Developed": "#d7191c",
+            "Barren": "#bdbdbd",
+            "Forest": "#1a9641",
+            "Shrub/Scrub": "#a6d96a",
+            "Grassland": "#ffffbf",
+            "Agriculture": "#fdae61",
+            "Wetlands": "#74add1",
+            "Other": "#969696",
+            "Unknown": "#d9d9d9"
         }
 
+        def style_function(feature):
+            landcover = feature["properties"].get("nlcd_class", "Unknown")
+            fill_color = landcover_colors.get(landcover, "#d9d9d9")
 
-tooltip_fields = [
-    "GEOID",
-    "observations",
-    "diversity",
-    "population_density",
-    "nlcd_class"
-]
+            return {
+                "fillColor": fill_color,
+                "color": "black",
+                "weight": 0.15,
+                "fillOpacity": 0.65
+            }
 
-tooltip_fields = [field for field in tooltip_fields if field in filtered.columns]
+    tooltip_fields = [
+        "GEOID",
+        "observations",
+        "diversity",
+        "population_density",
+        "nlcd_class"
+    ]
 
-tooltip_aliases = [
-    "Tract GEOID:",
-    "Observation effort:",
-    "Measured diversity:",
-    "Population density:",
-    "Land cover:"
-][:len(tooltip_fields)]
+    tooltip_aliases = [
+        "Tract GEOID:",
+        "Observation effort:",
+        "Measured diversity:",
+        "Population density:",
+        "Land cover:"
+    ]
 
-filtered_geoids = set(filtered["GEOID"].astype(str).str.replace(".0", "", regex=False))
+    folium.GeoJson(
+        filtered_geojson,
+        style_function=style_function,
+        tooltip=folium.GeoJsonTooltip(
+            fields=tooltip_fields,
+            aliases=tooltip_aliases,
+            localize=True
+        )
+    ).add_to(m)
 
-filtered_features = []
-
-for feature in geojson_data["features"]:
-    feature_geoid = str(feature["properties"].get("GEOID")).replace(".0", "")
-    
-    if feature_geoid in filtered_geoids:
-        filtered_features.append(feature)
-
-filtered_geojson = {
-    "type": "FeatureCollection",
-    "features": filtered_features
-}
-
-st.write("Features shown on map:", len(filtered_features))
-
-folium.GeoJson(
-    filtered_geojson,
-    style_function=style_function,
-    tooltip=folium.GeoJsonTooltip(
-        fields=tooltip_fields,
-        aliases=tooltip_aliases,
-        localize=True
-    )
-).add_to(m)
-
-if len(filtered_features) > 0:
-    bounds = []
-
-    for feature in filtered_features:
-        geom = feature["geometry"]
-        
-        if geom["type"] == "Polygon":
-            coords = geom["coordinates"][0]
-            for lon, lat in coords:
-                bounds.append([lat, lon])
-        
-        elif geom["type"] == "MultiPolygon":
-            for polygon in geom["coordinates"]:
-                coords = polygon[0]
-                for lon, lat in coords:
-                    bounds.append([lat, lon])
-
-    if bounds:
-        m.fit_bounds(bounds)
-
-st_folium(m, use_container_width=True, height=650)
+    st_folium(m, use_container_width=True, height=650)
 
 
 # --------------------------------------------------
@@ -308,7 +361,7 @@ tab1, tab2, tab3, tab4 = st.tabs(
 # -------------------------
 
 with tab1:
-    st.markdown("### Observation Effort, Population Density, and Measured Diversity")
+    st.markdown("### Scatterplots")
 
     scatter_choice = st.selectbox(
         "Choose scatterplot",
@@ -319,55 +372,58 @@ with tab1:
         ]
     )
 
-    if scatter_choice == "Log observation effort vs measured diversity":
-        fig = px.scatter(
-            filtered,
-            x="log_observations",
-            y="diversity",
-            color="nlcd_class",
-            trendline="ols",
-            hover_data=["GEOID", "observations", "population_density"],
-            title="Log Observation Effort vs Measured Bird Diversity"
-        )
-
-        fig.update_layout(
-            xaxis_title="Log Observation Effort",
-            yaxis_title="Measured Bird Diversity"
-        )
-
-    elif scatter_choice == "Log population density vs log observation effort":
-        fig = px.scatter(
-            filtered,
-            x="log_population_density",
-            y="log_observations",
-            color="nlcd_class",
-            trendline="ols",
-            hover_data=["GEOID", "observations", "population_density"],
-            title="Log Population Density vs Log Observation Effort"
-        )
-
-        fig.update_layout(
-            xaxis_title="Log Population Density",
-            yaxis_title="Log Observation Effort"
-        )
-
+    if len(filtered) == 0:
+        st.warning("No data available for the selected filters.")
     else:
-        fig = px.scatter(
-            filtered,
-            x="log_population_density",
-            y="diversity",
-            color="nlcd_class",
-            trendline="ols",
-            hover_data=["GEOID", "observations", "population_density"],
-            title="Log Population Density vs Measured Bird Diversity"
-        )
+        if scatter_choice == "Log observation effort vs measured diversity":
+            fig = px.scatter(
+                filtered,
+                x="log_observations",
+                y="diversity",
+                color="nlcd_class",
+                trendline="ols",
+                hover_data=["GEOID", "observations", "population_density"],
+                title="Log Observation Effort vs Measured Bird Diversity"
+            )
 
-        fig.update_layout(
-            xaxis_title="Log Population Density",
-            yaxis_title="Measured Bird Diversity"
-        )
+            fig.update_layout(
+                xaxis_title="Log Observation Effort",
+                yaxis_title="Measured Bird Diversity"
+            )
 
-    st.plotly_chart(fig, use_container_width=True)
+        elif scatter_choice == "Log population density vs log observation effort":
+            fig = px.scatter(
+                filtered,
+                x="log_population_density",
+                y="log_observations",
+                color="nlcd_class",
+                trendline="ols",
+                hover_data=["GEOID", "observations", "population_density"],
+                title="Log Population Density vs Log Observation Effort"
+            )
+
+            fig.update_layout(
+                xaxis_title="Log Population Density",
+                yaxis_title="Log Observation Effort"
+            )
+
+        else:
+            fig = px.scatter(
+                filtered,
+                x="log_population_density",
+                y="diversity",
+                color="nlcd_class",
+                trendline="ols",
+                hover_data=["GEOID", "observations", "population_density"],
+                title="Log Population Density vs Measured Bird Diversity"
+            )
+
+            fig.update_layout(
+                xaxis_title="Log Population Density",
+                yaxis_title="Measured Bird Diversity"
+            )
+
+        st.plotly_chart(fig, use_container_width=True)
 
 
 # -------------------------
@@ -386,38 +442,126 @@ with tab2:
         ]
     )
 
-    if box_choice == "Measured diversity by land cover":
-        y_col = "diversity"
-        title = "Measured Bird Diversity by Land Cover"
-        y_label = "Measured Bird Diversity"
-
-    elif box_choice == "Log observation effort by land cover":
-        y_col = "log_observations"
-        title = "Log Observation Effort by Land Cover"
-        y_label = "Log Observation Effort"
-
+    if len(filtered) == 0:
+        st.warning("No data available for the selected filters.")
     else:
-        y_col = "log_population_density"
-        title = "Log Population Density by Land Cover"
-        y_label = "Log Population Density"
+        if box_choice == "Measured diversity by land cover":
+            y_col = "diversity"
+            title = "Measured Bird Diversity by Land Cover"
+            y_label = "Measured Bird Diversity"
 
-    fig = px.box(
-        filtered,
-        x="nlcd_class",
-        y=y_col,
-        color="nlcd_class",
-        points="outliers",
-        title=title
+        elif box_choice == "Log observation effort by land cover":
+            y_col = "log_observations"
+            title = "Log Observation Effort by Land Cover"
+            y_label = "Log Observation Effort"
+
+        else:
+            y_col = "log_population_density"
+            title = "Log Population Density by Land Cover"
+            y_label = "Log Population Density"
+
+        fig = px.box(
+            filtered,
+            x="nlcd_class",
+            y=y_col,
+            color="nlcd_class",
+            points="outliers",
+            title=title
+        )
+
+        fig.update_layout(
+            xaxis_title="Dominant NLCD Land Cover",
+            yaxis_title=y_label,
+            showlegend=False,
+            xaxis_tickangle=-30
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+
+# -------------------------
+# Frequency charts
+# -------------------------
+
+with tab3:
+    st.markdown("### Frequency Charts")
+
+    freq_choice = st.selectbox(
+        "Choose frequency chart",
+        [
+            "Number of tracts by land cover",
+            "Distribution of log observation effort",
+            "Distribution of measured diversity",
+            "Distribution of log population density"
+        ]
     )
 
-    fig.update_layout(
-        xaxis_title="Dominant NLCD Land Cover",
-        yaxis_title=y_label,
-        showlegend=False,
-        xaxis_tickangle=-30
-    )
+    if len(filtered) == 0:
+        st.warning("No data available for the selected filters.")
+    else:
+        if freq_choice == "Number of tracts by land cover":
+            landcover_counts = (
+                filtered["nlcd_class"]
+                .value_counts()
+                .reset_index()
+            )
 
-    st.plotly_chart(fig, use_container_width=True)
+            landcover_counts.columns = ["nlcd_class", "tract_count"]
+
+            fig = px.bar(
+                landcover_counts,
+                x="nlcd_class",
+                y="tract_count",
+                text="tract_count",
+                title="Frequency of Census Tracts by Dominant Land Cover"
+            )
+
+            fig.update_layout(
+                xaxis_title="Dominant NLCD Land Cover",
+                yaxis_title="Number of Census Tracts",
+                xaxis_tickangle=-30
+            )
+
+        elif freq_choice == "Distribution of log observation effort":
+            fig = px.histogram(
+                filtered,
+                x="log_observations",
+                nbins=40,
+                title="Distribution of Log Observation Effort"
+            )
+
+            fig.update_layout(
+                xaxis_title="Log Observation Effort",
+                yaxis_title="Number of Census Tracts"
+            )
+
+        elif freq_choice == "Distribution of measured diversity":
+            fig = px.histogram(
+                filtered,
+                x="diversity",
+                nbins=40,
+                title="Distribution of Measured Bird Diversity"
+            )
+
+            fig.update_layout(
+                xaxis_title="Measured Bird Diversity",
+                yaxis_title="Number of Census Tracts"
+            )
+
+        else:
+            fig = px.histogram(
+                filtered,
+                x="log_population_density",
+                nbins=40,
+                title="Distribution of Log Population Density"
+            )
+
+            fig.update_layout(
+                xaxis_title="Log Population Density",
+                yaxis_title="Number of Census Tracts"
+            )
+
+        st.plotly_chart(fig, use_container_width=True)
 
 
 # -------------------------
@@ -427,47 +571,86 @@ with tab2:
 with tab4:
     st.markdown("### Correlation Heatmap")
 
-    heatmap_data = filtered.copy()
+    if len(filtered) < 3:
+        st.warning("Not enough data for a correlation heatmap.")
+    else:
+        heatmap_data = filtered.copy()
 
-    landcover_dummies = pd.get_dummies(
-        heatmap_data["nlcd_class"],
-        prefix="LC"
-    )
+        landcover_dummies = pd.get_dummies(
+            heatmap_data["nlcd_class"],
+            prefix="LC"
+        )
 
-    numeric_cols = [
+        numeric_cols = [
+            "observations",
+            "log_observations",
+            "diversity",
+            "population_density",
+            "log_population_density"
+        ]
+
+        heatmap_table = pd.concat(
+            [
+                heatmap_data[numeric_cols],
+                landcover_dummies
+            ],
+            axis=1
+        )
+
+        corr_matrix = heatmap_table.corr()
+
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        sns.heatmap(
+            corr_matrix,
+            annot=True,
+            cmap="coolwarm",
+            center=0,
+            linewidths=0.5,
+            fmt=".2f",
+            ax=ax
+        )
+
+        ax.set_title(
+            "Correlation Heatmap: Effort, Diversity, Population Density, and Land Cover"
+        )
+
+        st.pyplot(fig)
+
+
+# --------------------------------------------------
+# Top tracts table
+# --------------------------------------------------
+
+st.subheader("Top Census Tracts")
+
+ranking_choice = st.selectbox(
+    "Rank tracts by",
+    [
         "observations",
-        "log_observations",
         "diversity",
+        "population_density"
+    ]
+)
+
+if len(filtered) == 0:
+    st.warning("No data available for the selected filters.")
+else:
+    table_cols = [
+        "GEOID",
+        "observations",
+        "diversity",
+        "population",
         "population_density",
-        "log_population_density"
+        "nlcd_class"
     ]
 
-    heatmap_table = pd.concat(
-        [
-            heatmap_data[numeric_cols],
-            landcover_dummies
-        ],
-        axis=1
-    )
+    top_tracts = filtered.sort_values(
+        ranking_choice,
+        ascending=False
+    )[table_cols].head(20)
 
-    corr_matrix = heatmap_table.corr()
-
-    fig, ax = plt.subplots(figsize=(12, 8))
-
-    sns.heatmap(
-        corr_matrix,
-        annot=True,
-        cmap="coolwarm",
-        center=0,
-        linewidths=0.5,
-        fmt=".2f",
-        ax=ax
-    )
-
-    ax.set_title("Correlation Heatmap: Effort, Diversity, Population Density, and Land Cover")
-
-    st.pyplot(fig)
-
+    st.dataframe(top_tracts, use_container_width=True)
 
 
 # --------------------------------------------------
@@ -480,9 +663,14 @@ st.markdown(
     """
     - **Observation effort** is the number of bird records in each Census tract.
     - **Measured diversity** is the number of unique bird species recorded in each tract.
-    - **Population density** is Census tract population divided by tract area in square kilometers.
-    - **Land cover** comes from the dominant NLCD class in each tract.
+    - **Population density** is tract population divided by tract area in square kilometers.
+    - **Land cover** is the dominant NLCD land-cover class in each tract.
+    - Log-transformed variables are used because observation counts and population density are highly skewed.
 
+    A tract with high measured diversity may truly have many species, but it may also have more recorded species
+    because it received more observation effort.
+    """
+)
     A tract with high measured diversity may truly have many species, but it may also have more recorded species
     because it received more observation effort.
     """
