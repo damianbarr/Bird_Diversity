@@ -213,6 +213,7 @@ left_col, right_col = st.columns(2)
 
 with left_col:
     left_map_variable = st.selectbox(
+        "Map 1",
         options=map_options,
         index=0,
         key="left_map_variable"
@@ -220,6 +221,7 @@ with left_col:
 
 with right_col:
     right_map_variable = st.selectbox(
+        "Map 2",
         options=map_options,
         index=1,
         key="right_map_variable"
@@ -489,92 +491,6 @@ with tab2:
         )
 
         st.plotly_chart(fig, use_container_width=True)
-
-
-# -------------------------
-# Frequency charts
-# -------------------------
-
-with tab3:
-    st.markdown("### Frequency Charts")
-
-    freq_choice = st.selectbox(
-        "Choose frequency chart",
-        [
-            "Number of tracts by land cover",
-            "Distribution of log observation effort",
-            "Distribution of measured diversity",
-            "Distribution of log population density"
-        ]
-    )
-
-    if len(filtered) == 0:
-        st.warning("No data available for the selected filters.")
-    else:
-        if freq_choice == "Number of tracts by land cover":
-            landcover_counts = (
-                filtered["nlcd_class"]
-                .value_counts()
-                .reset_index()
-            )
-
-            landcover_counts.columns = ["nlcd_class", "tract_count"]
-
-            fig = px.bar(
-                landcover_counts,
-                x="nlcd_class",
-                y="tract_count",
-                text="tract_count",
-                title="Frequency of Census Tracts by Dominant Land Cover"
-            )
-
-            fig.update_layout(
-                xaxis_title="Dominant NLCD Land Cover",
-                yaxis_title="Number of Census Tracts",
-                xaxis_tickangle=-30
-            )
-
-        elif freq_choice == "Distribution of log observation effort":
-            fig = px.histogram(
-                filtered,
-                x="log_observations",
-                nbins=40,
-                title="Distribution of Log Observation Effort"
-            )
-
-            fig.update_layout(
-                xaxis_title="Log Observation Effort",
-                yaxis_title="Number of Census Tracts"
-            )
-
-        elif freq_choice == "Distribution of measured diversity":
-            fig = px.histogram(
-                filtered,
-                x="diversity",
-                nbins=40,
-                title="Distribution of Measured Bird Diversity"
-            )
-
-            fig.update_layout(
-                xaxis_title="Measured Bird Diversity",
-                yaxis_title="Number of Census Tracts"
-            )
-
-        else:
-            fig = px.histogram(
-                filtered,
-                x="log_population_density",
-                nbins=40,
-                title="Distribution of Log Population Density"
-            )
-
-            fig.update_layout(
-                xaxis_title="Log Population Density",
-                yaxis_title="Number of Census Tracts"
-            )
-
-        st.plotly_chart(fig, use_container_width=True)
-
 
 # -------------------------
 # Correlation heatmap
