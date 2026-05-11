@@ -237,7 +237,7 @@ filtered_geojson = {
     "type": "FeatureCollection",
     "features": [
         feature for feature in geojson_data["features"]
-        if str(feature["properties"]..get("GEOID")) in filtered_geoids
+        if str(feature["properties"].get("GEOID")) in filtered_geoids
     ]
 }
 
