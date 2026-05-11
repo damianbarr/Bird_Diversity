@@ -77,6 +77,10 @@ def load_data():
 
 tracts, geojson_data = load_data()
 
+st.write("Rows loaded:", len(tracts))
+st.write("GeoJSON features loaded:", len(geojson_data["features"]))
+st.write(tracts.head())
+
 
 # --------------------------------------------------
 # Sidebar filters
