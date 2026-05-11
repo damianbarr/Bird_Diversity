@@ -58,7 +58,7 @@ st.markdown(
 
 @st.cache_data
 def load_data():
-    geojson_file = "tract_bird_population_landcover_map.geojson"
+    geojson_file = "tract_streamlit_observed.geojson"
 
     with open(geojson_file, "r") as f:
         geojson_data = json.load(f)
