@@ -127,7 +127,30 @@ selected_landcovers = st.sidebar.multiselect(
     options=available_landcovers,
     default=available_landcovers
 )
+# Avoid huge slider problems by using log observations for filter
+min_log_obs = float(tracts["log_observations"].min())
+max_log_obs = float(tracts["log_observations"].max())
 
+log_obs_range = st.sidebar.slider(
+    "Log observation effort range",
+    min_value=min_log_obs,
+    max_value=max_log_obs,
+    value=(min_log_obs, max_log_obs)
+)
+
+map_variable = st.sidebar.selectbox(
+    "Choose map variable",
+    options=[
+        "log_observations",
+        "log_diversity",
+        "log_population_density",
+        "observations",
+        "diversity",
+        "population_density",
+        "nlcd_class"
+    ],
+    index=0
+)
 filtered = tracts[
     (tracts["nlcd_class"].isin(selected_landcovers)) &
     (tracts["log_observations"] >= log_obs_range[0]) &
