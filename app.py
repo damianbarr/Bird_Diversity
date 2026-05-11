@@ -545,42 +545,6 @@ with tab4:
 
         st.pyplot(fig)
 
-
-# --------------------------------------------------
-# Top tracts table
-# --------------------------------------------------
-
-st.subheader("Top Census Tracts")
-
-ranking_choice = st.selectbox(
-    "Rank tracts by",
-    [
-        "observations",
-        "diversity",
-        "population_density"
-    ]
-)
-
-if len(filtered) == 0:
-    st.warning("No data available for the selected filters.")
-else:
-    table_cols = [
-        "GEOID",
-        "observations",
-        "diversity",
-        "population",
-        "population_density",
-        "nlcd_class"
-    ]
-
-    top_tracts = filtered.sort_values(
-        ranking_choice,
-        ascending=False
-    )[table_cols].head(20)
-
-    st.dataframe(top_tracts, use_container_width=True)
-
-
 # --------------------------------------------------
 # Interpretation
 # --------------------------------------------------
