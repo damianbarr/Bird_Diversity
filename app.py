@@ -670,7 +670,4 @@ st.markdown(
     A tract with high measured diversity may truly have many species, but it may also have more recorded species
     because it received more observation effort.
     """
-    A tract with high measured diversity may truly have many species, but it may also have more recorded species
-    because it received more observation effort.
-    """
 )
