@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import geopandas as gpd
 import numpy as np
 import plotly.express as px
 import matplotlib.pyplot as plt
@@ -8,6 +7,7 @@ import seaborn as sns
 import folium
 from streamlit_folium import st_folium
 import branca.colormap as cm
+import json
 
 
 # --------------------------------------------------
@@ -16,7 +16,6 @@ import branca.colormap as cm
 
 st.set_page_config(
     page_title="Texas Bird Diversity Dashboard",
-    page_icon="🐦",
     layout="wide"
 )
 
@@ -39,30 +38,44 @@ st.markdown(
 
 @st.cache_data
 def load_data():
-    gdf = gpd.read_file("tract_bird_population_landcover_map.geojson")
+    with open("tract_bird_population_landcover_map.geojson", "r") as f:
+        geojson_data = json.load(f)
 
-    # Make sure geometry is WGS84 for mapping
-    if gdf.crs is None:
-        gdf = gdf.set_crs("EPSG:4326")
-    else:
-        gdf = gdf.to_crs("EPSG:4326")
+    records = []
 
-    # Create log columns safely
-    for col in ["observations", "diversity", "population_density", "total_birds"]:
-        if col in gdf.columns:
-            gdf[col] = pd.to_numeric(gdf[col], errors="coerce").fillna(0)
+    for feature in geojson_data["features"]:
+        props = feature["properties"].copy()
+        records.append(props)
 
-    gdf["log_observations"] = np.log1p(gdf["observations"])
-    gdf["log_diversity"] = np.log1p(gdf["diversity"])
-    gdf["log_population_density"] = np.log1p(gdf["population_density"])
+    df = pd.DataFrame(records)
 
-    if "nlcd_class" not in gdf.columns:
-        gdf["nlcd_class"] = "Unknown"
+    # Clean numeric columns
+    numeric_cols = [
+        "observations",
+        "diversity",
+        "population",
+        "population_density",
+        "total_birds"
+    ]
 
-    return gdf
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    # Create log columns
+    df["log_observations"] = np.log1p(df["observations"])
+    df["log_diversity"] = np.log1p(df["diversity"])
+    df["log_population_density"] = np.log1p(df["population_density"])
+
+    if "nlcd_class" not in df.columns:
+        df["nlcd_class"] = "Unknown"
+
+    df["GEOID"] = df["GEOID"].astype(str)
+
+    return df, geojson_data
 
 
-tracts = load_data()
+tracts, geojson_data = load_data()
 
 
 # --------------------------------------------------
@@ -218,8 +231,18 @@ tooltip_aliases = [
     "Land cover:"
 ][:len(tooltip_fields)]
 
+filtered_geoids = set(filtered["GEOID"].astype(str))
+
+filtered_geojson = {
+    "type": "FeatureCollection",
+    "features": [
+        feature for feature in geojson_data["features"]
+        if str(feature["properties"]..get("GEOID")) in filtered_geoids
+    ]
+}
+
 folium.GeoJson(
-    filtered,
+    filtered_geojson,
     style_function=style_function,
     tooltip=folium.GeoJsonTooltip(
         fields=tooltip_fields,
