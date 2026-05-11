@@ -49,6 +49,8 @@ def load_data():
 
     df = pd.DataFrame(records)
 
+    df["GEOID"] = df["GEOID"].astype(str).str.replace(".0", "", regex=False)
+
     # Clean numeric columns
     numeric_cols = [
         "observations",
@@ -235,7 +237,7 @@ tooltip_aliases = [
     "Land cover:"
 ][:len(tooltip_fields)]
 
-filtered_geoids = set(filtered["GEOID"].astype(str))
+filtered_geoids = set(filtered["GEOID"].astype(str).str.replace(".0", "", regex=False))
 
 filtered_geojson = {
     "type": "FeatureCollection",
