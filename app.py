@@ -21,7 +21,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🐦 Texas Bird Diversity and Citizen-Science Effort Dashboard")
+st.title(" Texas Bird Diversity and Citizen-Science Effort Dashboard")
 
 st.markdown(
     """
