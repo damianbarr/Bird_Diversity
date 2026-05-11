@@ -217,30 +217,61 @@ filtered_geojson = make_filtered_geojson(geojson_data, filtered)
 # --------------------------------------------------
 # Interactive map
 # --------------------------------------------------
+# --------------------------------------------------
+# Side-by-side interactive maps
+# --------------------------------------------------
 
-st.subheader("Interactive Map")
+st.subheader("Side-by-Side Map Comparison")
 
 st.markdown(
     """
-    Use the sidebar to change the mapped variable and filter by land cover.
-    Log-transformed variables help show patterns when data are highly skewed.
+    Compare two spatial patterns side by side. For example, compare **observation effort**
+    with **measured bird diversity**, or compare **population density** with **observation effort**.
     """
 )
 
-m = folium.Map(
-    location=[31.0, -99.0],
-    zoom_start=5,
-    tiles="cartodbpositron"
-)
+map_options = [
+    "log_observations",
+    "log_diversity",
+    "log_population_density",
+    "observations",
+    "diversity",
+    "population_density",
+    "nlcd_class"
+]
 
-if len(filtered_geojson["features"]) == 0:
-    st.warning("No tracts match the selected filters.")
-else:
+left_col, right_col = st.columns(2)
+
+with left_col:
+    left_map_variable = st.selectbox(
+        "Left map variable",
+        options=map_options,
+        index=0,
+        key="left_map_variable"
+    )
+
+with right_col:
+    right_map_variable = st.selectbox(
+        "Right map variable",
+        options=map_options,
+        index=1,
+        key="right_map_variable"
+    )
+
+
+def make_map(map_variable, filtered_df, filtered_geojson):
+    m = folium.Map(
+        location=[31.0, -99.0],
+        zoom_start=5,
+        tiles="cartodbpositron"
+    )
+
+    if len(filtered_geojson["features"]) == 0:
+        return m
 
     # Continuous variable map
     if map_variable != "nlcd_class":
-
-        values = filtered[map_variable].replace([np.inf, -np.inf], np.nan).dropna()
+        values = filtered_df[map_variable].replace([np.inf, -np.inf], np.nan).dropna()
 
         if len(values) == 0:
             vmin, vmax = 0, 1
@@ -337,9 +368,23 @@ else:
         )
     ).add_to(m)
 
-    st_folium(m, use_container_width=True, height=650)
+    return m
 
 
+if len(filtered_geojson["features"]) == 0:
+    st.warning("No tracts match the selected filters.")
+else:
+    left_col, right_col = st.columns(2)
+
+    with left_col:
+        st.markdown(f"### Left Map: `{left_map_variable}`")
+        left_map = make_map(left_map_variable, filtered, filtered_geojson)
+        st_folium(left_map, use_container_width=True, height=550, key="left_map")
+
+    with right_col:
+        st.markdown(f"### Right Map: `{right_map_variable}`")
+        right_map = make_map(right_map_variable, filtered, filtered_geojson)
+        st_folium(right_map, use_container_width=True, height=550, key="right_map")
 # --------------------------------------------------
 # Charts
 # --------------------------------------------------
